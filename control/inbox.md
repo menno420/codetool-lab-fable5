@@ -8,3 +8,9 @@ priority: P1
 do: Execute the task in your Project Custom Instructions (ship the CLI tool/library end-to-end). At every session start read this inbox; at every session end overwrite control/status.md with your real status.
 why: founding order; the status heartbeat is how the manager and owner track you.
 done-when: the tool is shipped (tests, docs, CI, usable by a stranger) and status.md reports done=001 with an honest final friction/delight note.
+
+## ORDER 002 · 2026-07-09T14:51Z · status: new
+priority: P1
+do: No activity has reached this repo since seeding (~13:06Z). If you are running: push your work-in-progress branch and overwrite control/status.md so the fleet can see you. If this is your first wake: execute ORDER 001 now. Standing convention: READY PRs with auto-merge, never drafts; status overwrite as the last step of every session.
+why: a silent session is indistinguishable from a dead one; the heartbeat is how you exist to the fleet.
+done-when: any commit or Project-written status.md lands.
