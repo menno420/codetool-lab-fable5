@@ -21,6 +21,9 @@ both failure modes loud:
 
 - **`envdrift check`** fails CI when `.env.example` and the real environment
   disagree, with a precise, line-numbered report.
+- **`envdrift sync`** (and `check --fix`) writes the missing keys into your
+  `.env` with the example's values as safe placeholders — no more copying
+  them over by hand.
 - **`envdrift example`** generates example files with every value stripped,
   so there is nothing to leak.
 - **`envdrift lint --example`** catches secret-looking values that made it
@@ -48,16 +51,19 @@ $ echo $?
 1
 ```
 
-Fix the drift, and:
+Let envdrift fix it, and re-check:
 
 ```console
+$ envdrift sync
+added: STRIPE_WEBHOOK_SECRET
+sync: added 1 key(s) to .env
 $ envdrift check
 ok: .env matches .env.example
 ```
 
 ## Commands
 
-### `envdrift check [--env .env] [--example .env.example] [--allow-extra] [--format text|json]`
+### `envdrift check [--env .env] [--example .env.example] [--allow-extra] [--fix] [--format text|json]`
 
 Compares an env file against its example and reports three kinds of drift:
 
@@ -77,6 +83,67 @@ extra: DEBUG_HACK (in .env but not in .env.example)
 empty: API_KEY (empty in .env but non-empty in .env.example)
 drift: 1 missing, 1 extra, 1 empty
 ```
+
+**`--fix`** reports the drift as usual, then appends the *missing* keys to
+the env file exactly as `envdrift sync` does (same comment marker, same
+placeholder values — see below). Only the missing category is fixable;
+`extra` and `empty` findings are reported but never auto-fixed (envdrift
+will not delete your keys or invent values). Exit codes with `--fix`:
+**0** if everything fixable was fixed and no unfixable drift remains,
+**1** if unfixable drift (`extra`/`empty`) remains, **2** on errors.
+Unlike `sync`, `check --fix` requires the env file to exist.
+
+```console
+$ envdrift check --fix
+missing: REDIS_URL (in .env.example but not in .env)
+extra: DEBUG_HACK (in .env but not in .env.example)
+drift: 1 missing, 1 extra, 0 empty
+fixed: added REDIS_URL to .env
+fix: added 1 key(s); 1 unfixable finding(s) remain
+$ echo $?
+1
+```
+
+### `envdrift sync [--env .env] [--example .env.example] [--dry-run] [--format text|json]`
+
+Appends every key that is present in the example but missing from the env
+file, at the **end** of the env file under a `# added by envdrift sync`
+comment, using the example's value **verbatim** as the placeholder —
+`.env.example` is non-secret by design, so its values are safe scaffolding
+defaults. sync never modifies or overwrites existing keys or values, never
+reorders anything, and preserves the existing content byte-for-byte apart
+from the appended block (plus a terminating newline if the file lacked
+one). If the env file does not exist, it is created. CRLF files get a
+CRLF-terminated block.
+
+```console
+$ cat .env.example
+DB_HOST=localhost
+DB_PASSWORD=
+REDIS_URL=redis://localhost:6379/0
+$ envdrift sync
+added: DB_PASSWORD
+added: REDIS_URL
+sync: added 2 key(s) to .env
+$ echo $?
+0
+```
+
+**`--dry-run`** prints what would be added and writes nothing, with
+`check`-style CI-friendly exit codes: **1** if changes would be made,
+**0** if already in sync, **2** on errors.
+
+```console
+$ envdrift sync --dry-run
+would add: DB_PASSWORD (from .env.example)
+would add: REDIS_URL (from .env.example)
+sync: would add 2 key(s) to .env (dry-run)
+$ echo $?
+1
+```
+
+Without `--dry-run` the exit code is **0** on success (including "nothing
+to add") and **2** on errors.
 
 ### `envdrift diff A B [--values] [--format text|json]`
 
@@ -148,7 +215,7 @@ $ envdrift lint .env.example --example
 
 ```console
 $ envdrift --version
-envdrift 0.1.0
+envdrift 0.2.0
 $ envdrift check --help
 ```
 
@@ -156,9 +223,21 @@ $ envdrift check --help
 
 | code | meaning |
 |---|---|
-| 0 | clean — no drift / identical / no findings |
-| 1 | findings — drift detected, files differ, or lint findings |
+| 0 | clean — no drift / identical / no findings / write succeeded |
+| 1 | findings — drift detected, files differ, lint findings, or changes would be made |
 | 2 | error — bad usage, unreadable file, invalid regex |
+
+Per command:
+
+| command | 0 | 1 |
+|---|---|---|
+| `check` | no drift | drift found |
+| `check --fix` | everything fixable fixed, nothing unfixable remains | unfixable drift (`extra`/`empty`) remains |
+| `sync` | success (keys appended, or nothing to add) | — (never) |
+| `sync --dry-run` | already in sync | changes would be made |
+| `diff` | identical | differences |
+| `lint` | clean | findings |
+| `example` | written | — (never) |
 
 All error messages go to stderr; reports go to stdout.
 
@@ -177,6 +256,20 @@ object on stdout:
   "missing": ["REDIS_URL"],   // key names, example order
   "extra": ["DEBUG_HACK"],
   "empty": ["API_KEY"]
+}
+
+// envdrift check --fix --format json adds:
+//   "fixed": ["REDIS_URL"]        // keys appended to the env file
+
+// envdrift sync --format json
+{
+  "command": "sync",
+  "env": ".env",
+  "example": ".env.example",
+  "dry_run": false,
+  "ok": true,                 // mirrors the exit code (0 <=> true)
+  "added": ["DB_PASSWORD"],   // keys appended (or that would be, with --dry-run)
+  "created": false            // true when sync created the env file
 }
 
 // envdrift diff A B --format json
@@ -203,7 +296,33 @@ object on stdout:
 
 `ok` is always present; exit codes are unchanged by `--format json`.
 
-## CI recipe
+## Recipes
+
+### pre-commit hook
+
+A [pre-commit](https://pre-commit.com) `repo: local` hook that blocks
+commits while your `.env` is out of step with the committed example
+(`envdrift check` exits 1 on drift, which fails the hook):
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: local
+    hooks:
+      - id: envdrift-check
+        name: envdrift check
+        entry: envdrift check
+        language: python
+        additional_dependencies:
+          - "envdrift @ git+https://github.com/menno420/codetool-lab-fable5"
+        pass_filenames: false
+        always_run: true
+```
+
+When the hook fails, `envdrift sync` (or `envdrift check --fix`) writes
+the missing keys for you; fill in the real values and commit again.
+
+### GitHub Actions job
 
 Gate pull requests on env-file honesty:
 
@@ -222,6 +341,8 @@ jobs:
       - run: pip install git+https://github.com/menno420/codetool-lab-fable5
       # example files must be committed and secret-free
       - run: envdrift lint .env.example --example
+      # fail the job if a template .env would need changes (nothing is written)
+      # - run: envdrift sync --env .env.defaults --example .env.example --dry-run
       # optional: your deploy tooling can render the real env and check it
       # - run: envdrift check --env .env.rendered --example .env.example
 ```
@@ -231,20 +352,30 @@ jobs:
 envdrift parses the common dotenv dialect:
 
 - blank lines and `#` comments (standalone and inline);
-- `KEY=value` and `export KEY=value`;
+- `KEY=value` and `export KEY=value` (any spacing after `export`);
 - unquoted, single-quoted, and double-quoted values;
 - double-quoted values process `\n`, `\t`, `\\`, `\"` (unknown escapes are
   kept literally); single-quoted values are literal;
-- unquoted values may contain `=`; an inline `#` comment is only recognized
-  when preceded by whitespace (`COLOR=#ff00aa` is a value);
+- **multi-line quoted values**: a quoted value that does not close on its
+  own line continues across the following lines to the closing quote; line
+  breaks inside the value are `\n` regardless of the file's line endings.
+  If the quote never closes anywhere in the file, only the first line is
+  consumed and `lint` reports `unclosed-quote`;
+- `#` inside a quoted value is part of the value, never a comment; an
+  unquoted inline `#` comment is only recognized when preceded by
+  whitespace (`COLOR=#ff00aa` is a value);
+- unquoted values may contain `=`;
+- CRLF line endings and a UTF-8 BOM at the start of the file are accepted
+  and preserved; values never include a stray `\r`, and the BOM is never
+  treated as part of the first key;
 - empty values (`KEY=`) and whitespace around `=` are parsed (the latter is
-  flagged by `lint`);
+  flagged by `lint`); trailing whitespace after a closing quote is ignored;
 - on duplicate keys, the last assignment wins (and `lint` reports it).
 
-Deliberately **not** supported: multi-line values, variable interpolation
-(`${VAR}`), backslash line continuations, and YAML-ish `KEY: value` syntax.
-Files using those features will produce `invalid-line` findings rather than
-silent misreads.
+Deliberately **not** supported: variable interpolation (`${VAR}`),
+backslash line continuations, bare `KEY` with no `=`, and YAML-ish
+`KEY: value` syntax. Files using those features will produce
+`invalid-line` findings rather than silent misreads.
 
 ## Development
 
