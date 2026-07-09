@@ -12,10 +12,19 @@ Supported dialect
   only when the ``#`` is preceded by whitespace.
 * Empty values (``KEY=``) and whitespace around ``=`` are accepted
   (the latter is flagged by ``envdrift lint``).
+* Multi-line quoted values: a quoted value that does not close on its own
+  line continues across the following lines until the closing quote.
+  Line breaks inside the value are ``\\n`` regardless of the file's line
+  endings. If the quote never closes anywhere in the file, only the first
+  line is consumed and an ``unclosed-quote`` issue is reported.
+* CRLF line endings are accepted and preserved on round-trip; parsed
+  values never include a trailing ``\\r``.
+* A UTF-8 BOM at the start of the file is accepted (and re-emitted by
+  :meth:`EnvFile.render`); it is not treated as part of the first key.
 
-Deliberately NOT supported (out of scope, kept simple): multi-line values,
+Deliberately NOT supported (out of scope, kept simple):
 variable interpolation (``${VAR}``), backslash line continuations, and
-``KEY value`` (no ``=``) syntax.
+``KEY value`` / bare ``KEY`` (no ``=``) syntax.
 
 Duplicate keys and invalid key names (valid: ``[A-Za-z_][A-Za-z0-9_]*``)
 are detected and reported as issues; parsing still continues.
@@ -27,6 +36,8 @@ import re
 from dataclasses import dataclass, field
 
 KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+
+BOM = "\ufeff"
 
 # A line that looks like an assignment: optional indent, optional `export `,
 # a key token (anything except whitespace/=/#), optional spaces, `=`, rest.
@@ -72,7 +83,12 @@ class Entry:
 
 @dataclass
 class Line:
-    """One physical line of the source file."""
+    """One logical line of the source file.
+
+    A multi-line quoted value is stored as a single ``Line`` whose ``raw``
+    contains embedded ``\\n`` separators; ``number`` is its first physical
+    line.
+    """
 
     number: int
     raw: str  # without trailing newline
@@ -88,6 +104,7 @@ class EnvFile:
     entries: list[Entry] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
     trailing_newline: bool = True
+    bom: bool = False  # file started with a UTF-8 BOM
 
     def ordered_keys(self) -> list[str]:
         """Unique keys in first-occurrence order."""
@@ -115,6 +132,8 @@ class EnvFile:
         text = "\n".join(line.raw for line in self.lines)
         if self.lines and self.trailing_newline:
             text += "\n"
+        if self.bom:
+            text = BOM + text
         return text
 
 
@@ -193,9 +212,34 @@ def _parse_unquoted(rest: str, ws_after: str):
     return rest.rstrip(), None
 
 
+def _find_close(segment: str, quote: str, start: int) -> int:
+    """Index of the closing quote in ``segment`` from ``start``, or -1.
+
+    For double quotes, backslash-escaped quotes do not close.
+    """
+    i = start
+    while i < len(segment):
+        char = segment[i]
+        if quote == '"' and char == "\\" and i + 1 < len(segment):
+            i += 2
+            continue
+        if char == quote:
+            return i
+        i += 1
+    return -1
+
+
+def _strip_cr(segment: str) -> str:
+    """Drop one trailing carriage return (CRLF line endings)."""
+    return segment[:-1] if segment.endswith("\r") else segment
+
+
 def parse(text: str) -> EnvFile:
     """Parse dotenv text into an :class:`EnvFile`."""
     env = EnvFile()
+    if text.startswith(BOM):
+        env.bom = True
+        text = text[len(BOM) :]
     env.trailing_newline = text.endswith("\n")
     raw_lines = text.split("\n")
     if env.trailing_newline:
@@ -204,7 +248,11 @@ def parse(text: str) -> EnvFile:
         raw_lines = []
 
     seen: dict[str, int] = {}
-    for number, raw in enumerate(raw_lines, start=1):
+    idx = 0
+    while idx < len(raw_lines):
+        raw = raw_lines[idx]
+        number = idx + 1
+        idx += 1
         stripped = raw.strip()
         if not stripped:
             env.lines.append(Line(number=number, raw=raw, kind="blank"))
@@ -245,8 +293,21 @@ def parse(text: str) -> EnvFile:
         unclosed = False
         if rest.startswith('"') or rest.startswith("'"):
             quote = rest[0]
-            value, comment, unclosed = _parse_quoted(rest, quote, number, env.issues, key)
-            raw_value = _raw_quoted_portion(rest, quote)
+            # Multi-line: the quote does not close on this physical line —
+            # consume following lines until the line where it closes. If it
+            # never closes, fall through to the single-line unclosed path.
+            if _find_close(_strip_cr(rest), quote, 1) < 0:
+                end = idx  # index of the physical line that closes the quote
+                while end < len(raw_lines) and _find_close(raw_lines[end], quote, 0) < 0:
+                    end += 1
+                if end < len(raw_lines):
+                    segments = [rest] + raw_lines[idx : end + 1]
+                    rest = "\n".join(_strip_cr(seg) for seg in segments)
+                    raw = "\n".join([raw] + raw_lines[idx : end + 1])
+                    idx = end + 1
+            logical = _strip_cr(rest)
+            value, comment, unclosed = _parse_quoted(logical, quote, number, env.issues, key)
+            raw_value = _raw_quoted_portion(logical, quote)
         else:
             quote = None
             value, comment = _parse_unquoted(rest, ws_after)
@@ -295,6 +356,10 @@ def _raw_quoted_portion(rest: str, quote: str) -> str:
 
 
 def parse_file(path: str) -> EnvFile:
-    """Parse a dotenv file from disk. Raises ``OSError`` if unreadable."""
-    with open(path, encoding="utf-8") as handle:
+    """Parse a dotenv file from disk. Raises ``OSError`` if unreadable.
+
+    Opened with ``newline=""`` so CRLF line endings reach the parser (and
+    :meth:`EnvFile.render`) untouched instead of being normalized to LF.
+    """
+    with open(path, encoding="utf-8", newline="") as handle:
         return parse(handle.read())

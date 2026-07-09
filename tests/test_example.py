@@ -75,3 +75,26 @@ def test_example_round_trips_through_check(tmp_path, capsys):
     dest = tmp_path / ".env.example"
     assert main(["example", src, "-o", str(dest)]) == 0
     assert main(["check", "--env", src, "--example", str(dest)]) == 0
+
+
+def test_example_preserves_crlf_endings(tmp_path, capsys):
+    src = tmp_path / ".env"
+    src.write_bytes(b"# note\r\nA=secret\r\n")
+    out = tmp_path / ".env.example"
+    assert main(["example", str(src), "-o", str(out)]) == 0
+    assert out.read_bytes() == b"# note\r\nA=\r\n"
+
+
+def test_example_preserves_bom(tmp_path, capsys):
+    src = tmp_path / ".env"
+    src.write_bytes(b"\xef\xbb\xbfA=secret\n")
+    out = tmp_path / ".env.example"
+    assert main(["example", str(src), "-o", str(out)]) == 0
+    assert out.read_bytes() == b"\xef\xbb\xbfA=\n"
+
+
+def test_example_multiline_value_stripped_to_single_line(tmp_path, capsys):
+    src = tmp_path / ".env"
+    src.write_text('CERT="line1\nline2"\nB=2\n')
+    assert main(["example", str(src)]) == 0
+    assert capsys.readouterr().out == "CERT=\nB=\n"

@@ -11,7 +11,7 @@ import re
 import sys
 
 from envdrift.commands import EXIT_OK, CliError, load
-from envdrift.parser import EnvFile
+from envdrift.parser import BOM, EnvFile
 
 
 def generate(env: EnvFile, keep_pattern=None) -> str:
@@ -25,10 +25,14 @@ def generate(env: EnvFile, keep_pattern=None) -> str:
         value = entry.raw_value if keep else ""
         prefix = "export " if entry.export else ""
         comment = " " + entry.inline_comment if entry.inline_comment else ""
-        out.append(f"{prefix}{entry.key}={value}{comment}")
+        # Entry lines are rewritten; keep the CRLF ending if the source had one.
+        cr = "\r" if line.raw.endswith("\r") else ""
+        out.append(f"{prefix}{entry.key}={value}{comment}{cr}")
     text = "\n".join(out)
     if env.lines and env.trailing_newline:
         text += "\n"
+    if env.bom:
+        text = BOM + text
     return text
 
 
@@ -45,7 +49,7 @@ def run(args) -> int:
 
     if args.output:
         try:
-            with open(args.output, "w", encoding="utf-8") as handle:
+            with open(args.output, "w", encoding="utf-8", newline="") as handle:
                 handle.write(text)
         except OSError as exc:
             raise CliError(f"cannot write {args.output}: {exc.strerror or exc}") from exc
