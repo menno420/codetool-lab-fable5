@@ -26,7 +26,7 @@ def test_unknown_command_is_usage_error(capsys):
     assert excinfo.value.code == 2
 
 
-@pytest.mark.parametrize("cmd", ["check", "diff", "example", "lint"])
+@pytest.mark.parametrize("cmd", ["check", "diff", "example", "lint", "sync"])
 def test_subcommand_help(cmd, capsys):
     with pytest.raises(SystemExit) as excinfo:
         main([cmd, "--help"])

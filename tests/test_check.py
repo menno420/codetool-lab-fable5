@@ -77,3 +77,70 @@ def test_check_missing_file_exit_2(tmp_path, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "cannot read" in captured.err
+
+
+def test_check_fix_appends_missing(tmp_path, capsys):
+    env = write(tmp_path, ".env", "A=1\n")
+    example = write(tmp_path, ".env.example", "A=\nB=placeholder\n")
+    assert main(["check", "--env", env, "--example", example, "--fix"]) == 0
+    out = capsys.readouterr().out
+    assert "missing: B" in out  # drift still reported first
+    assert "fixed: added B" in out
+    with open(env, encoding="utf-8") as handle:
+        assert handle.read() == "A=1\n# added by envdrift sync\nB=placeholder\n"
+
+
+def test_check_fix_exit_1_when_unfixable_remains(tmp_path, capsys):
+    env = write(tmp_path, ".env", "A=1\nEXTRA=x\n")
+    example = write(tmp_path, ".env.example", "A=\nB=\n")
+    assert main(["check", "--env", env, "--example", example, "--fix"]) == 1
+    out = capsys.readouterr().out
+    assert "fixed: added B" in out
+    assert "1 unfixable finding(s) remain" in out
+
+
+def test_check_fix_never_fixes_empty(tmp_path, capsys):
+    env = write(tmp_path, ".env", "API_KEY=\n")
+    example = write(tmp_path, ".env.example", "API_KEY=needed\n")
+    assert main(["check", "--env", env, "--example", example, "--fix"]) == 1
+    with open(env, encoding="utf-8") as handle:
+        assert handle.read() == "API_KEY=\n"  # untouched
+
+
+def test_check_fix_with_allow_extra(tmp_path, capsys):
+    env = write(tmp_path, ".env", "A=1\nEXTRA=x\n")
+    example = write(tmp_path, ".env.example", "A=\nB=\n")
+    code = main(
+        ["check", "--env", env, "--example", example, "--fix", "--allow-extra"]
+    )
+    assert code == 0
+
+
+def test_check_fix_clean_is_noop(tmp_path, capsys):
+    env = write(tmp_path, ".env", "A=1\n")
+    example = write(tmp_path, ".env.example", "A=\n")
+    assert main(["check", "--env", env, "--example", example, "--fix"]) == 0
+    assert "ok:" in capsys.readouterr().out
+    with open(env, encoding="utf-8") as handle:
+        assert handle.read() == "A=1\n"
+
+
+def test_check_fix_json_shape(tmp_path, capsys):
+    env = write(tmp_path, ".env", "A=1\nE=\n")
+    example = write(tmp_path, ".env.example", "A=\nB=\nE=nonempty\n")
+    code = main(
+        ["check", "--env", env, "--example", example, "--fix", "--format", "json"]
+    )
+    assert code == 1  # empty: E remains unfixable
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["missing"] == ["B"]
+    assert payload["fixed"] == ["B"]
+    assert payload["empty"] == ["E"]
+    assert payload["ok"] is False
+
+
+def test_check_without_fix_has_no_fixed_field(tmp_path, capsys):
+    env = write(tmp_path, ".env", "A=1\n")
+    example = write(tmp_path, ".env.example", "A=\nB=\n")
+    assert main(["check", "--env", env, "--example", example, "--format", "json"]) == 1
+    assert "fixed" not in json.loads(capsys.readouterr().out)
