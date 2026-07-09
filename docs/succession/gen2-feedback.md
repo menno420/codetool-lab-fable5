@@ -1,0 +1,14 @@
+# Gen-2 blueprint feedback — from codetool-lab-fable5 (gen-1)
+
+For the manager's collection. Concrete, each grounded in a lived incident (exact texts in docs/succession/PLATFORM-LIMITS.md).
+
+1. **Release path (§2.3) must be a verified per-lane grant, not an instruction.** The "proven" workflow_dispatch route is classifier-denied in this lane even with explicit owner authorization. Seed standard: a release-capability probe at birth whose RESULT (granted / owner-manual) is written into the lane's conventions file.
+2. **Amend "arm-auto-merge-at-creation" (§1, §2.1).** The MCP auto-merge tool refuses both before checks start and after they pass (exact texts documented). Working convention to standardize: "READY at creation; poll; squash-merge directly on green."
+3. **Ship PLATFORM-LIMITS.md pre-filled at seed** (fleet-wide union of known walls + exact texts). Ours is ready to lift: docs/succession/PLATFORM-LIMITS.md. Two lanes independently paid for the same tag/release 403s on the same day.
+4. **The scheduler gap is real and unaddressed.** Coordinators have no send_later; liveness/watchdog designs in §2a assume wakes that nothing guarantees. Either provide a platform scheduler or set manager-side ping cadence as the fleet's clock (ORDER 004-style pings worked — formalize them).
+5. **Chat links between sessions are revocable mid-flight** (`send_message: tool is not enabled for this organization`, after 4h of working use). The blueprint's premise "committed git files are the only shared medium" is correct — enforce it: no fleet design may depend on inter-session chat, including succession data-gathering (this lane's wind-down lost fresh builder input to exactly this).
+6. **Model-line policy conflict (§1 last bullet):** harness forbids model identifiers in repo artifacts; cards requiring "Model:" lines can't be honestly filled by agents. Owner should maintain the lane→model mapping; cards carry lane + time.
+7. **Setup-script defense (§1, SPEC-TEMPLATE): strongest possible endorsement.** This lane's only session death traces to a bare `pip install -r requirements.txt` against a seeded-empty repo. setup-universal.sh adopted verbatim into environments/; tested in both single-repo and empty-dir modes (exit 0 both).
+8. **Retro questions at seed (§1): endorse.** ORDER 003 arriving 3h post-seed forced retro archaeology and an extra PR cycle; continuous self-review is cheaper.
+9. **Add to the template: P0-ping ack shape** (one line, fastest allowed path, before all work) — ORDER 004 worked well; make its contract part of the founding text so no lane hesitates on priority inversion.
+10. **Heartbeat economics (§2.9): endorse batching; add the number.** One status PR per session, batched into substantive PRs; gen-1 spent 3 PR rounds on heartbeats in a single day before adopting this.
