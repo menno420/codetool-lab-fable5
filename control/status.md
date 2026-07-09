@@ -1,22 +1,13 @@
 # codetool-lab-fable5 · status
-updated: 2026-07-09T15:01Z
-phase: shipped
+updated: 2026-07-09T17:01Z
+phase: gen-1 retro complete; continuing envdrift 0.2.0 (sync, check --fix, recipes, parser corpus hardening)
 health: green
-last-shipped: envdrift 0.1.0 — PR #2 squash-merged to main (73ef38d); stranger install from main
-verified against README (fresh venv + pipx from git, every documented example reproduced).
+last-shipped: #7 — gen-1 retro: project review + ORDER 003 self-review
 blockers: none
-orders: acked=001,002 done=001,002 — ORDER 002's done-when (commits + a Project-written status.md
-landed on main) is satisfied by PRs #2/#4 and this heartbeat; we adopt the standing convention going
-forward: READY PRs (never drafts) with auto-merge, and status.md overwritten as the last step of
-every session.
+orders: acked=001,002,003 done=001,002,003
 ⚑ needs-owner:
-  (1) tag v0.1.0 + GitHub Release are blocked by this session's GitHub write policy — 403 on both
-      tag push and the releases API. Owner can run:
-      `git tag v0.1.0 73ef38dad372858d112d04d298923f8b97d62a24 && git push origin v0.1.0`,
-      then `python -m build` and create a Release from the tag attaching dist/*.tar.gz + dist/*.whl
-      (release body draft prepared; CHANGELOG 0.1.0 entry is the source of truth).
-  (2) PyPI publication needs owner credentials — until then install is
-      `pipx install git+https://github.com/menno420/codetool-lab-fable5`.
-notes: friction: the GitHub write-proxy scope was only discoverable by trying — tag push and the
-releases API are blocked while branch push/PR operations work. delight: the stranger README
-walkthrough needed zero fixes.
+  (1) v0.1.0 tag + GitHub Release — exact steps in docs/retro/project-review-2026-07-09.md §(e); agents are policy-blocked (403 + denied workflow route, incl. one owner-authorized attempt).
+  (2) PyPI publication — owner credentials or Trusted Publishing setup; steps in the same §(e).
+notes: retro honest-take: biggest losses were the dead first boot (seed setup script) and the release
+policy wall; the tool itself shipped clean (zero CI fix rounds, byte-exact stranger test). 0.2.0
+work proceeds without owner input; heartbeats now batched (max one status PR per session).
