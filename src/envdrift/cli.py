@@ -11,6 +11,7 @@ from envdrift.commands import check as check_cmd
 from envdrift.commands import diff as diff_cmd
 from envdrift.commands import example as example_cmd
 from envdrift.commands import lint as lint_cmd
+from envdrift.commands import sync as sync_cmd
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,8 +42,37 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="do not report keys present in the env but absent from the example",
     )
+    p_check.add_argument(
+        "--fix",
+        action="store_true",
+        help="append missing keys to the env file (same as `envdrift sync`); "
+        "extra/empty findings are reported but never auto-fixed",
+    )
     p_check.add_argument("--format", choices=["text", "json"], default="text")
     p_check.set_defaults(func=check_cmd.run)
+
+    p_sync = sub.add_parser(
+        "sync",
+        help="append keys missing from .env using the example's values",
+        description="Append keys present in the example but missing from the env "
+        "file, at the end of the env file under a '# added by envdrift sync' "
+        "comment, using the example's value verbatim as the placeholder "
+        "(.env.example is non-secret by design). Existing keys and values are "
+        "never modified or reordered; the env file is created if absent. "
+        "Exit 0 on success, 2 errors; with --dry-run: 1 if changes would be "
+        "made, 0 if in sync, 2 errors.",
+    )
+    p_sync.add_argument("--env", default=".env", help="env file to update (default: .env)")
+    p_sync.add_argument(
+        "--example", default=".env.example", help="example file (default: .env.example)"
+    )
+    p_sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print what would be added and write nothing (exit 1 if out of sync)",
+    )
+    p_sync.add_argument("--format", choices=["text", "json"], default="text")
+    p_sync.set_defaults(func=sync_cmd.run)
 
     p_diff = sub.add_parser(
         "diff",

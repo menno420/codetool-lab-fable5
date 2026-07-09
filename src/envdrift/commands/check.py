@@ -1,8 +1,17 @@
-"""``envdrift check`` — compare .env against .env.example."""
+"""``envdrift check`` — compare .env against .env.example.
+
+With ``--fix``, missing keys are appended to the env file exactly as
+``envdrift sync`` would (under a ``# added by envdrift sync`` comment,
+example values verbatim as placeholders). Only the "missing" category is
+fixable; "extra" and "empty" findings are reported but never auto-fixed.
+Exit codes with ``--fix``: 0 if everything fixable was fixed and nothing
+unfixable remains, 1 if unfixable drift (extra/empty) remains, 2 errors.
+"""
 
 from __future__ import annotations
 
 from envdrift.commands import EXIT_FINDINGS, EXIT_OK, emit_json, load
+from envdrift.commands.sync import append_missing, missing_entries
 
 
 def run(args) -> int:
@@ -24,18 +33,25 @@ def run(args) -> int:
 
     ok = not (missing or extra or empty)
 
+    fixed: list[str] = []
+    if args.fix and missing:
+        entries = missing_entries(env_map, example)
+        append_missing(args.env, entries)
+        fixed = [entry.key for entry in entries]
+
     if args.format == "json":
-        emit_json(
-            {
-                "command": "check",
-                "env": args.env,
-                "example": args.example,
-                "ok": ok,
-                "missing": missing,
-                "extra": extra,
-                "empty": empty,
-            }
-        )
+        payload = {
+            "command": "check",
+            "env": args.env,
+            "example": args.example,
+            "ok": ok,
+            "missing": missing,
+            "extra": extra,
+            "empty": empty,
+        }
+        if args.fix:
+            payload["fixed"] = fixed
+        emit_json(payload)
     else:
         if ok:
             print(f"ok: {args.env} matches {args.example}")
@@ -49,4 +65,16 @@ def run(args) -> int:
             print(
                 f"drift: {len(missing)} missing, {len(extra)} extra, {len(empty)} empty"
             )
+            for key in fixed:
+                print(f"fixed: added {key} to {args.env}")
+            if args.fix:
+                unfixable = len(extra) + len(empty)
+                print(
+                    f"fix: added {len(fixed)} key(s); "
+                    f"{unfixable} unfixable finding(s) remain"
+                )
+
+    if args.fix:
+        # Missing keys were fixed; only extra/empty drift remains unfixable.
+        return EXIT_OK if not (extra or empty) else EXIT_FINDINGS
     return EXIT_OK if ok else EXIT_FINDINGS
