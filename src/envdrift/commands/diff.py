@@ -11,9 +11,9 @@ def run(args) -> int:
     map_a = file_a.as_dict()
     map_b = file_b.as_dict()
 
-    added = [k for k in file_b.keys() if k not in map_a]
-    removed = [k for k in file_a.keys() if k not in map_b]
-    changed = [k for k in file_a.keys() if k in map_b and map_a[k] != map_b[k]]
+    added = [k for k in file_b.ordered_keys() if k not in map_a]
+    removed = [k for k in file_a.ordered_keys() if k not in map_b]
+    changed = [k for k in file_a.ordered_keys() if k in map_b and map_a[k] != map_b[k]]
 
     ok = not (added or removed or changed)
 
@@ -33,17 +33,17 @@ def run(args) -> int:
         emit_json(payload)
     else:
         if ok:
-            print("identical: %s and %s define the same keys and values" % (args.a, args.b))
+            print(f"identical: {args.a} and {args.b} define the same keys and values")
         else:
             for key in added:
-                print("+ %s%s" % (key, "=" + map_b[key] if args.values else ""))
+                print("+ {}{}".format(key, "=" + map_b[key] if args.values else ""))
             for key in removed:
-                print("- %s%s" % (key, "=" + map_a[key] if args.values else ""))
+                print("- {}{}".format(key, "=" + map_a[key] if args.values else ""))
             for key in changed:
                 if args.values:
-                    print("~ %s: %r -> %r" % (key, map_a[key], map_b[key]))
+                    print(f"~ {key}: {map_a[key]!r} -> {map_b[key]!r}")
                 else:
-                    print("~ %s: <changed>" % key)
+                    print(f"~ {key}: <changed>")
     return EXIT_OK if ok else EXIT_FINDINGS
 
 

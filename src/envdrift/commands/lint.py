@@ -47,8 +47,8 @@ def run(args) -> int:
                     "line": entry.line,
                     "code": "space-around-equals",
                     "key": entry.key,
-                    "message": "whitespace around '=' in %s (most loaders reject or "
-                    "misread this)" % entry.key,
+                    "message": f"whitespace around '=' in {entry.key} (most loaders reject or "
+                    "misread this)",
                 }
             )
         if args.example and entry.value:
@@ -58,8 +58,8 @@ def run(args) -> int:
                         "line": entry.line,
                         "code": "secret-key",
                         "key": entry.key,
-                        "message": "%s looks like a secret but has a non-empty value "
-                        "in an example file" % entry.key,
+                        "message": f"{entry.key} looks like a secret but has a non-empty value "
+                        "in an example file",
                     }
                 )
             elif looks_high_entropy(entry.value):
@@ -68,8 +68,8 @@ def run(args) -> int:
                         "line": entry.line,
                         "code": "high-entropy-value",
                         "key": entry.key,
-                        "message": "value of %s looks high-entropy (possible secret) "
-                        "in an example file" % entry.key,
+                        "message": f"value of {entry.key} looks high-entropy (possible secret) "
+                        "in an example file",
                     }
                 )
 
@@ -80,10 +80,11 @@ def run(args) -> int:
         emit_json({"command": "lint", "file": args.file, "ok": ok, "findings": findings})
     else:
         if ok:
-            print("ok: %s is clean" % args.file)
+            print(f"ok: {args.file} is clean")
         else:
             for finding in findings:
-                print("%s:%d: %s: %s" % (args.file, finding["line"], finding["code"],
-                                         finding["message"]))
-            print("%d finding(s)" % len(findings))
+                print(
+                    f"{args.file}:{finding['line']}: {finding['code']}: {finding['message']}"
+                )
+            print(f"{len(findings)} finding(s)")
     return EXIT_OK if ok else EXIT_FINDINGS

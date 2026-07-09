@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import List, Optional
 
 from envdrift import __version__
 from envdrift.commands import EXIT_ERROR, CliError
@@ -21,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
         "generate safe examples, and lint for common mistakes.",
     )
     parser.add_argument(
-        "--version", action="version", version="envdrift %s" % __version__
+        "--version", action="version", version=f"envdrift {__version__}"
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
@@ -99,13 +98,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         return args.func(args)
     except CliError as exc:
-        print("envdrift: error: %s" % exc, file=sys.stderr)
+        print(f"envdrift: error: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
 

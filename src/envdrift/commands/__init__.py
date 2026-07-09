@@ -20,7 +20,7 @@ def load(path: str) -> EnvFile:
     try:
         return parse_file(path)
     except OSError as exc:
-        raise CliError("cannot read %s: %s" % (path, exc.strerror or exc)) from exc
+        raise CliError(f"cannot read {path}: {exc.strerror or exc}") from exc
 
 
 def emit_json(payload: dict) -> None:

@@ -25,7 +25,7 @@ def generate(env: EnvFile, keep_pattern=None) -> str:
         value = entry.raw_value if keep else ""
         prefix = "export " if entry.export else ""
         comment = " " + entry.inline_comment if entry.inline_comment else ""
-        out.append("%s%s=%s%s" % (prefix, entry.key, value, comment))
+        out.append(f"{prefix}{entry.key}={value}{comment}")
     text = "\n".join(out)
     if env.lines and env.trailing_newline:
         text += "\n"
@@ -38,7 +38,7 @@ def run(args) -> int:
         try:
             keep_pattern = re.compile(args.keep_values_for)
         except re.error as exc:
-            raise CliError("invalid --keep-values-for regex: %s" % exc) from exc
+            raise CliError(f"invalid --keep-values-for regex: {exc}") from exc
 
     env = load(args.envfile)
     text = generate(env, keep_pattern)
@@ -48,7 +48,7 @@ def run(args) -> int:
             with open(args.output, "w", encoding="utf-8") as handle:
                 handle.write(text)
         except OSError as exc:
-            raise CliError("cannot write %s: %s" % (args.output, exc.strerror or exc)) from exc
+            raise CliError(f"cannot write {args.output}: {exc.strerror or exc}") from exc
     else:
         sys.stdout.write(text)
     return EXIT_OK

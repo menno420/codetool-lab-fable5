@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
@@ -52,7 +51,7 @@ class Issue:
     line: int
     code: str
     message: str
-    key: Optional[str] = None
+    key: str | None = None
 
 
 @dataclass
@@ -62,9 +61,9 @@ class Entry:
     key: str
     value: str  # parsed value (escapes processed for double quotes)
     line: int
-    quote: Optional[str] = None  # '"', "'" or None
+    quote: str | None = None  # '"', "'" or None
     export: bool = False
-    inline_comment: Optional[str] = None  # includes the leading '#'
+    inline_comment: str | None = None  # includes the leading '#'
     raw_value: str = ""  # value exactly as written (incl. quotes)
     key_valid: bool = True
     unclosed_quote: bool = False
@@ -78,19 +77,19 @@ class Line:
     number: int
     raw: str  # without trailing newline
     kind: str  # 'blank' | 'comment' | 'entry' | 'invalid'
-    entry: Optional[Entry] = None
+    entry: Entry | None = None
 
 
 @dataclass
 class EnvFile:
     """Parsed dotenv file: ordered lines, entries, and issues."""
 
-    lines: List[Line] = field(default_factory=list)
-    entries: List[Entry] = field(default_factory=list)
-    issues: List[Issue] = field(default_factory=list)
+    lines: list[Line] = field(default_factory=list)
+    entries: list[Entry] = field(default_factory=list)
+    issues: list[Issue] = field(default_factory=list)
     trailing_newline: bool = True
 
-    def keys(self) -> List[str]:
+    def ordered_keys(self) -> list[str]:
         """Unique keys in first-occurrence order."""
         seen = set()
         out = []
@@ -100,13 +99,13 @@ class EnvFile:
                 out.append(entry.key)
         return out
 
-    def as_dict(self) -> Dict[str, str]:
+    def as_dict(self) -> dict[str, str]:
         """Key -> value mapping. On duplicates the last assignment wins."""
         return {entry.key: entry.value for entry in self.entries}
 
-    def duplicates(self) -> Dict[str, List[int]]:
+    def duplicates(self) -> dict[str, list[int]]:
         """Keys assigned more than once -> their line numbers."""
-        positions: Dict[str, List[int]] = {}
+        positions: dict[str, list[int]] = {}
         for entry in self.entries:
             positions.setdefault(entry.key, []).append(entry.line)
         return {k: v for k, v in positions.items() if len(v) > 1}
@@ -135,7 +134,7 @@ def _unescape(value: str) -> str:
     return "".join(out)
 
 
-def _split_after_quote(remainder: str, lineno: int, issues: List[Issue], key: str):
+def _split_after_quote(remainder: str, lineno: int, issues: list[Issue], key: str):
     """Handle text after a closing quote: inline comment or junk."""
     stripped = remainder.strip()
     if not stripped:
@@ -146,14 +145,14 @@ def _split_after_quote(remainder: str, lineno: int, issues: List[Issue], key: st
         Issue(
             line=lineno,
             code="trailing-junk",
-            message="unexpected text after closing quote: %r" % stripped,
+            message=f"unexpected text after closing quote: {stripped!r}",
             key=key,
         )
     )
     return None
 
 
-def _parse_quoted(rest: str, quote: str, lineno: int, issues: List[Issue], key: str):
+def _parse_quoted(rest: str, quote: str, lineno: int, issues: list[Issue], key: str):
     """Parse a value starting with a quote char. Returns (value, comment, unclosed)."""
     i = 1
     chars = []
@@ -172,7 +171,7 @@ def _parse_quoted(rest: str, quote: str, lineno: int, issues: List[Issue], key: 
         chars.append(char)
         i += 1
     issues.append(
-        Issue(line=lineno, code="unclosed-quote", message="unclosed %s quote" % quote, key=key)
+        Issue(line=lineno, code="unclosed-quote", message=f"unclosed {quote} quote", key=key)
     )
     value = "".join(chars)
     if quote == '"':
@@ -185,9 +184,8 @@ def _parse_unquoted(rest: str, ws_after: str):
 
     An inline comment starts at a ``#`` preceded by whitespace.
     """
-    if rest.startswith("#"):
-        if ws_after:
-            return "", rest.strip()
+    if rest.startswith("#") and ws_after:
+        return "", rest.strip()
         # KEY=#value — '#' not preceded by whitespace, part of the value.
     for i, char in enumerate(rest):
         if char == "#" and i > 0 and rest[i - 1] in " \t":
@@ -205,7 +203,7 @@ def parse(text: str) -> EnvFile:
     if text == "":
         raw_lines = []
 
-    seen: Dict[str, int] = {}
+    seen: dict[str, int] = {}
     for number, raw in enumerate(raw_lines, start=1):
         stripped = raw.strip()
         if not stripped:
@@ -222,7 +220,7 @@ def parse(text: str) -> EnvFile:
                 Issue(
                     line=number,
                     code="invalid-line",
-                    message="not a KEY=value assignment: %r" % stripped,
+                    message=f"not a KEY=value assignment: {stripped!r}",
                 )
             )
             continue
@@ -239,7 +237,7 @@ def parse(text: str) -> EnvFile:
                 Issue(
                     line=number,
                     code="invalid-key",
-                    message="invalid key name: %r (expected [A-Za-z_][A-Za-z0-9_]*)" % key,
+                    message=f"invalid key name: {key!r} (expected [A-Za-z_][A-Za-z0-9_]*)",
                     key=key,
                 )
             )
@@ -271,7 +269,7 @@ def parse(text: str) -> EnvFile:
                 Issue(
                     line=number,
                     code="duplicate-key",
-                    message="duplicate key %r (first defined on line %d)" % (key, seen[key]),
+                    message=f"duplicate key {key!r} (first defined on line {seen[key]})",
                     key=key,
                 )
             )
