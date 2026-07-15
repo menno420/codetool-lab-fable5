@@ -1,0 +1,229 @@
+# merge-on-green — this repo's landing path for open PRs.
+#
+# ============================== PROVENANCE ==============================
+# Why added : merge-on-green coverage audit (2026-07-15) found this repo
+#             has working CI (.github/workflows/ci.yml, ruff+pytest matrix
+#             over Python 3.9-3.13) but ZERO durable merge automation. All
+#             16 historical PRs were merged manually by the human owner
+#             (menno420) via ad-hoc `gh pr merge` calls made by whatever
+#             agent session happened to be active — a documented
+#             per-session habit (PR bodies say things like "auto-merge
+#             armed if checks are pending" / "merged on green per repo
+#             convention"), not actual infrastructure. PR #15 sat open
+#             ~7.5h — evidence there is no reliable always-on mechanism,
+#             only session-dependent luck. This workflow makes "merge on
+#             green" durable instead of session-dependent.
+# Modeled on: menno420/fleet-manager .github/workflows/merge-on-green.yml
+#             @ 8671d8c1c9b444270793de376a2ebeb5f9d4ecaa — the REST
+#             verify-then-squash-merge pattern (works regardless of the
+#             repo Settings > "Allow auto-merge" toggle, whose state for
+#             THIS repo could not be verified with the tools available),
+#             the generic all-check-runs verification, the workflow-
+#             touching-PR owner-merge-only rail, and the ratification-
+#             park label carve-out.
+# Adapted for this repo (do not blindly re-sync from fleet-manager):
+#   * head-ref filter DROPPED. fleet-manager's sweep only lands PRs whose
+#     head branch starts with `claude/`; this repo's 16 historical PR
+#     branches used mixed, no-dominant-prefix naming (chore/status-*,
+#     feat/envdrift*, fix/*, audit/*, retro/*, succession/*, manager/*,
+#     seed/*, and only 2 of 16 actually `claude/*`) — a `claude/*`-only
+#     filter would have missed ~87% of this repo's real PRs. This
+#     version lands any same-repo, non-fork, base=main PR regardless of
+#     head-branch name.
+#   * in-progress session-card skip DROPPED. Fleet-manager parks PRs
+#     that touch a born-red `.sessions/*.md` card. This repo has no
+#     `.sessions/` directory or born-red-card convention, so that block
+#     does not apply and was removed rather than carried over dead.
+#   * workflow_run trigger points at this repo's actual CI workflow name
+#     (`CI`, the `name:` in ci.yml), not fleet-manager's own
+#     substrate-gate / roster-freshness workflows, which don't exist here.
+#   * check verification stays GENERIC (every check run on the head SHA,
+#     by name, minus this workflow's own self-exemption) on purpose:
+#     this repo's CI is a 5-version matrix (`test (3.9)` .. `test
+#     (3.13)`), so hardcoding job names would be brittle and would need
+#     updating every time the matrix changes.
+# Reliability: unverified — confirm its merges against ground truth a
+#             few times across sessions before trusting it.
+# Kill-switch: delete this if it proves unreliable over multiple sessions.
+# ========================================================================
+#
+# WHAT IT DOES: on check-suite completion / PR readiness or label changes
+# / this repo's CI workflow_run completion / a half-hourly cron backstop
+# / manual dispatch — sweep ALL open, non-draft, same-repo (non-fork) PRs
+# with base `main`; for each, verify EVERY check run on the head SHA is
+# completed+success (pending or missing = NOT ready — skip this round, a
+# later event or the next cron re-sweeps); then squash-merge directly
+# with GITHUB_TOKEN, pinned to the verified SHA.
+#
+# CARVE-OUTS (skipped, never merged/closed/rebased):
+#   * labels `do-not-automerge` / `owner-held` (a ratification park) —
+#     re-read FRESH from the API per PR every sweep, never trusted from
+#     a possibly-stale event payload;
+#   * any PR whose diff touches `.github/workflows/**` — workflow PRs
+#     stay OWNER-MERGE-ONLY, full stop. The PR that introduces this very
+#     file is itself such a PR and is therefore parked under its own
+#     rail: installing this automation does not grant itself a merge.
+#
+# TRANSPARENCY NOTE: this repo has no branch-protection review
+# requirement configured beyond the CI check itself, so this workflow
+# does not bypass or remove any review gate — it simply automates the
+# exact "squash-merge once CI is green" action the owner was already
+# performing by hand for all 16 prior PRs, so it keeps happening even
+# when no agent session is actively watching the PR.
+#
+# RACE GUARD: the merge call pins `--match-head-commit <verified SHA>`,
+# so a push racing the sweep can never land an unverified head.
+#
+# SELF-EXEMPTION: on `pull_request` triggers this workflow's own job is
+# itself a check run on the head SHA and is `in_progress` while it
+# evaluates — requiring it completed would deadlock every event-
+# triggered sweep. Only the check run named exactly `merge-on-green` is
+# exempt from the all-green requirement.
+#
+# KNOWN LIMIT (accepted): merges performed with GITHUB_TOKEN do not
+# trigger other `push`-event workflows on main (GitHub's recursion
+# guard) — nothing in this repo currently depends on that.
+name: merge-on-green
+
+on:
+  check_suite:
+    types: [completed]
+  pull_request:
+    types: [ready_for_review, synchronize, labeled, unlabeled]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  schedule:
+    # Reliable backstop: check_suite / workflow_run only fire from this
+    # file's copy on main, and GITHUB_TOKEN-created events don't
+    # retrigger workflows — the cron catches anything the event lanes
+    # miss (e.g. the PR#15-style "sat open for hours" gap this repo hit
+    # before this workflow existed).
+    - cron: "12,42 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+concurrency:
+  # One sweep at a time, repo-wide; queued (never cancelled) so a merge
+  # in flight is never killed halfway and a completion event arriving
+  # mid-sweep still gets its own follow-up pass.
+  group: merge-on-green
+  cancel-in-progress: false
+
+jobs:
+  merge-on-green:
+    if: github.repository == 'menno420/codetool-lab-fable5'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sweep open PRs and squash-merge the fully-green ones
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          PARK_LABELS = {"do-not-automerge", "owner-held"}
+          SELF_CHECK_NAMES = {"merge-on-green"}  # see SELF-EXEMPTION header note
+
+          def gh(*args, ok_fail=False):
+              # argv-only (never a shell string): PR-controlled values
+              # (branch names, titles) ride as arguments but can never
+              # splice into a command.
+              r = subprocess.run(["gh", *args], capture_output=True, text=True)
+              if r.returncode != 0 and not ok_fail:
+                  print(r.stderr, file=sys.stderr)
+                  sys.exit(1)  # fail LOUD: an unreadable API must not merge
+              return r.returncode, r.stdout, r.stderr
+
+          def parse_lines(out):
+              vals = []
+              for line in out.splitlines():
+                  if not line:
+                      continue
+                  v = json.loads(line)
+                  vals.append(json.loads(v) if isinstance(v, str) else v)
+              return vals
+
+          # All open PRs, filtered to the landing lane.
+          _, out, _ = gh("api", f"repos/{repo}/pulls?state=open&per_page=100",
+                         "--paginate", "--jq", ".[] | @json")
+          prs = parse_lines(out)
+
+          merged, skipped = [], []
+          for pr in prs:
+              n = pr["number"]
+              head_ref = pr["head"]["ref"]
+              head_sha = pr["head"]["sha"]
+              if pr.get("draft"):
+                  skipped.append((n, "draft")); continue
+              if pr["base"]["ref"] != "main":
+                  skipped.append((n, "base != main")); continue
+              if (pr["head"]["repo"] or {}).get("full_name") != repo:
+                  skipped.append((n, "fork head")); continue
+              # NOTE: intentionally no head-ref prefix filter here — see
+              # the "Adapted for this repo" header note.
+
+              # Ratification park — labels re-read FRESH (never trust the
+              # event payload; it can be stale by the time the sweep runs).
+              _, out, _ = gh("api", f"repos/{repo}/issues/{n}/labels",
+                             "--jq", "[.[].name]")
+              park = set(json.loads(out or "[]")) & PARK_LABELS
+              if park:
+                  skipped.append((n, f"ratification park: {sorted(park)}")); continue
+
+              # PR file listing feeds the workflow-touching-PR rail.
+              _, out, _ = gh("api", f"repos/{repo}/pulls/{n}/files?per_page=100",
+                             "--paginate", "--jq", ".[] | @json")
+              entries = parse_lines(out)
+              files = [e["filename"] for e in entries]
+
+              # Owner-merge-only rail: workflow-touching PRs are never
+              # merged by a workflow.
+              if any(f.startswith(".github/workflows/") for f in files):
+                  skipped.append((n, ".github/workflows/** in diff — "
+                                     "owner-merge-only")); continue
+
+              # GENERIC check verification: EVERY check run on the head
+              # SHA (latest attempt per name, minus the self-exemption)
+              # must be completed+success. Zero check runs = nothing
+              # verified = NOT ready. Pending anywhere = NOT ready.
+              _, out, _ = gh("api",
+                             f"repos/{repo}/commits/{head_sha}/check-runs"
+                             "?filter=latest&per_page=100", "--paginate",
+                             "--jq", '.check_runs[] | {name, status, conclusion} | @json')
+              runs = {cr["name"]: cr for cr in parse_lines(out)
+                      if cr["name"] not in SELF_CHECK_NAMES}
+              if not runs:
+                  skipped.append((n, "no check runs on head SHA — "
+                                     "nothing verified")); continue
+              not_ready = [f"{name}: {cr['status']}/{cr['conclusion']}"
+                           for name, cr in sorted(runs.items())
+                           if cr["status"] != "completed"
+                           or cr["conclusion"] != "success"]
+              if not_ready:
+                  skipped.append((n, "; ".join(not_ready))); continue
+
+              # Squash-merge, pinned to the SHA just verified so a race
+              # push can never land unverified. A failed merge (conflict,
+              # base moved) is a warning, not a crash — the next event or
+              # cron re-sweeps.
+              rc, mout, merr = gh("pr", "merge", str(n), "--repo", repo,
+                                  "--squash", "--match-head-commit", head_sha,
+                                  "--body", f"Head-ref: {head_ref}",
+                                  ok_fail=True)
+              if rc == 0:
+                  print(f"MERGED PR #{n} ({head_ref} @ {head_sha[:12]})")
+                  merged.append(n)
+              else:
+                  print(f"::warning::merge failed for PR #{n}: {merr.strip()}")
+                  skipped.append((n, "merge call failed (see warning)"))
+
+          for n, why in skipped:
+              print(f"skipped PR #{n}: {why}")
+          print(f"sweep done — merged: {merged or 'none'}")
+          PY
